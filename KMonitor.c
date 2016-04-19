@@ -22,9 +22,13 @@ long (*original_listen_call)(int, int);
 long (*original_connect_call)(int, struct sockaddr *, int *);
 long (*original_mount_call)(char *, char *, char *, unsigned long, void *);
 
-int file_monitoring = 0;
-int net_monitoring = 0;
-int mount_monitoring = 0;
+int file_monitoring = 1;
+int net_monitoring = 1;
+int mount_monitoring = 1;
+
+int file_monitoring_hijacked = 0;
+int net_monitoring_hijacked = 0;
+int mount_monitoring_hijacked = 0;
 
 unsigned long **find_sys_call_table()
 {
@@ -43,7 +47,14 @@ unsigned long **find_sys_call_table()
 
 int my_sys_open(const char *filename, int flags, int mode)
 {
-    printk(KERN_DEBUG "HIJACKED: open\n");
+    if( filename != 0)
+    {
+        printk(KERN_DEBUG "HIJACKED: open. %s %d\n", filename, current->pid);
+    }
+    else
+    {
+      printk(KERN_DEBUG "open: file name is null.\n");
+    }
     return original_open_call(filename, flags, mode);
 }
 
@@ -96,6 +107,7 @@ static int __init syscall_init(void)
 
     if(file_monitoring)
     {
+	file_monitoring_hijacked = 1;
 	original_open_call = syscall_table[__NR_open];
 	original_read_call = syscall_table[__NR_read];
 	original_write_call = syscall_table[__NR_write];
@@ -106,6 +118,7 @@ static int __init syscall_init(void)
 
     if(net_monitoring)
     {
+	net_monitoring_hijacked = 1;
 	original_listen_call = syscall_table[__NR_listen];
 	original_connect_call = syscall_table[__NR_connect];	
 	syscall_table[__NR_listen] = my_sys_listen;
@@ -114,7 +127,8 @@ static int __init syscall_init(void)
 
     if(mount_monitoring)
     {
-	original_mount_call = syscall_table[__NR_mount];
+	mount_monitoring_hijacked = 1;
+        original_mount_call = syscall_table[__NR_mount];
 	syscall_table[__NR_mount] = my_sys_mount;
     }
     write_cr0(cr0);
@@ -128,20 +142,20 @@ static void __exit syscall_release(void)
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
     
-    if(file_monitoring)
+    if(file_monitoring_hijacked)
     {
 	syscall_table[__NR_open] = original_open_call;
 	syscall_table[__NR_read] = original_read_call;
 	syscall_table[__NR_write] = original_write_call;
     }
 
-    if(net_monitoring)
+    if(net_monitoring_hijacked)
     {
 	syscall_table[__NR_listen] = original_listen_call;
 	syscall_table[__NR_connect] = original_connect_call;
     }
 
-    if(mount_monitoring)
+    if(mount_monitoring_hijacked)
     {
 	syscall_table[__NR_mount] = original_mount_call;
     }
