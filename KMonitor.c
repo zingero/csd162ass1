@@ -16,11 +16,11 @@ void **syscall_table;
 unsigned long **find_sys_call_table(void);
 
 long (*original_open_call)(const char *, int, int);
-long (*original_read_call)(const char *, int, int);
-long (*original_write_call)(const char *, int, int);
-long (*original_listen_call)(const char *, int, int);
-long (*original_connect_call)(const char *, int, int);
-long (*original_mount_call)(const char *, int, int);
+long (*original_read_call)(unsigned int, char *, size_t);
+long (*original_write_call)(unsigned int, const char *, size_t);
+long (*original_listen_call)(int, int);
+long (*original_connect_call)(int, struct sockaddr *, int *);
+long (*original_mount_call)(char *, char *, char *, unsigned long, void *);
 
 unsigned long **find_sys_call_table()
 {
@@ -43,34 +43,34 @@ int my_sys_open(const char *filename, int flags, int mode)
     return original_open_call(filename, flags, mode);
 }
 
-int my_sys_read(const char *filename, int flags, int mode)
+int my_sys_read(unsigned int fd, char * buf, size_t count)
 {
     printk(KERN_DEBUG "HIJACKED: read\n");
-    return original_read_call(filename, flags, mode);
+    return original_read_call(fd, buf, count);
 }
 
-int my_sys_write(const char *filename, int flags, int mode)
+int my_sys_write(unsigned int fd, const char * buf, size_t count)
 {
     printk(KERN_DEBUG "HIJACKED: write\n");
-    return original_write_call(filename, flags, mode);
+    return original_write_call(fd, buf, count);
 }
 
-int my_sys_listen(const char *filename, int flags, int mode)
+int my_sys_listen(int fd, int backlog)
 {
     printk(KERN_DEBUG "HIJACKED: listen\n");
-    return original_listen_call(filename, flags, mode);
+    return original_listen_call(fd, backlog);
 }
 
-int my_sys_connect(const char *filename, int flags, int mode)
+int my_sys_connect(int fd, struct sockaddr * uservaddr, int * addrlen)
 {
     printk(KERN_DEBUG "HIJACKED: connect\n");
-    return original_connect_call(filename, flags, mode);
+    return original_connect_call(fd, uservaddr, addrlen);
 }
 
-int my_sys_mount(const char *filename, int flags, int mode)
+int my_sys_mount(char * dev_name, char * dir_name, char * type, unsigned long flags, void * data)
 {
     printk(KERN_DEBUG "HIJACKED: mount\n");
-    return original_mount_call(filename, flags, mode);
+    return original_mount_call(dev_name, dir_name, type, flags, data);
 }
 
 static int __init syscall_init(void)
