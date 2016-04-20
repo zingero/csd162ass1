@@ -5,6 +5,13 @@
 #include <linux/delay.h> 
 #include <linux/sched.h>
 #include <linux/version.h>
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/proc_fs.h>
+
+static char msg[128];
+static int len = 0;
+static int len_check = 1;
 
 // Write Protect Bit (CR0:16)
 #define CR0_WP 0x00010000 
@@ -30,6 +37,50 @@ int file_monitoring_hijacked = 0;
 int net_monitoring_hijacked = 0;
 int mount_monitoring_hijacked = 0;
 
+int simple_proc_open(struct inode * sp_inode, struct file *sp_file)
+{
+	printk(KERN_INFO "proc called open\n");
+	return 0;
+}
+int simple_proc_release(struct inode *sp_indoe, struct file *sp_file)
+{
+	printk(KERN_INFO "proc called release\n");
+	return 0;
+}
+
+ssize_t simple_proc_read(struct file *sp_file,char __user *buf, size_t size, loff_t *offset)
+{
+	if (len_check)
+	 len_check = 0;
+	else 
+	{
+	 	len_check = 1;
+	 	return 0;
+	}
+
+	printk(KERN_INFO "proc called read %d\n",(int)size);
+	copy_to_user(buf,msg,len);
+	return len;
+}
+
+ssize_t simple_proc_write(struct file *sp_file,const char __user *buf, size_t size, loff_t *offset)
+{
+
+	printk(KERN_INFO "proc called write %d\n",(int)size);
+	len = size;
+	copy_from_user(msg,buf,len);
+	return len;
+}
+
+struct file_operations fops = 
+{
+.open = simple_proc_open,
+.read = simple_proc_read,
+.write = simple_proc_write,
+.release = simple_proc_release
+};
+
+
 unsigned long **find_sys_call_table()
 {
     unsigned long ptr;
@@ -47,9 +98,10 @@ unsigned long **find_sys_call_table()
 
 int my_sys_open(const char *filename, int flags, int mode)
 {
-    if( filename != 0)
+    char buf[100];
+    if(filename != 0)
     {
-        printk(KERN_DEBUG "HIJACKED: open. %s %d\n", filename, current->pid);
+        printk(KERN_DEBUG "HIJACKED: open. %s %d %s\n", filename, current->pid,	d_path(&(current->mm->exe_file->f_path), buf, 100));
     }
     else
     {
@@ -59,7 +111,7 @@ int my_sys_open(const char *filename, int flags, int mode)
 }
 
 int my_sys_read(unsigned int fd, char * buf, size_t count)
-{
+{   
     printk(KERN_DEBUG "HIJACKED: read\n");
     return original_read_call(fd, buf, count);
 }
@@ -94,6 +146,14 @@ static int __init syscall_init(void)
 
     syscall_table = (void **) find_sys_call_table();
 
+    	if (! proc_create("KMonitor",0666,NULL,&fops)) 
+	{
+		printk(KERN_INFO "ERROR! proc_create\n");
+		remove_proc_entry("KMonitor",NULL);
+		return -1;
+	}
+
+    
     if (! syscall_table) 
     {
         printk(KERN_DEBUG "ERROR: Cannot find the system call table address.\n"); 
@@ -141,6 +201,8 @@ static void __exit syscall_release(void)
 
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
+
+    remove_proc_entry("KMonitor",NULL);
     
     if(file_monitoring_hijacked)
     {
