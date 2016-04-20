@@ -6,7 +6,8 @@
 #include <linux/sched.h>
 #include <linux/version.h>
 
-// #include <linux/spinlock_types.h>
+#include <linux/file.h>
+#include <linux/spinlock_types.h>
 // #include <linux/kthread.h>
 // #include <linux/net.h>
 // #include <linux/socket.h>
@@ -27,7 +28,7 @@ MODULE_LICENSE("GPL");
 
 void **syscall_table;
 
-// spinlock_t lock;
+ spinlock_t lock;
 //spin_lock_init(&lock);
 
 unsigned long **find_sys_call_table(void);
@@ -64,10 +65,10 @@ unsigned long **find_sys_call_table()
 
 int my_sys_open(const char *filename, int flags, int mode)
 {
-	spin_lock(&lock);
 	char buf[100];
+	spin_lock(&lock);
 
-    if( filename != 0)
+    if(filename != 0)
     {
         printk(KERN_DEBUG "HIJACKED: open. %s %d %s\n", filename, current->pid, d_path(&(current->mm->exe_file->f_path), buf, 100));
     }
@@ -82,11 +83,15 @@ int my_sys_open(const char *filename, int flags, int mode)
 int my_sys_read(unsigned int fd, char * buf, size_t count)
 {
     
+    char temp [100];
+    char buffer[100];
+    char *filename;
+    
     spin_lock(&lock);
-    char buf[100];
-    if( filename != 0)
+    filename = d_path(&(fget(fd)->f_path), temp, 100);
+    if(filename != 0)
     {
-        printk(KERN_DEBUG "HIJACKED: read. %s %d %s %d \n", filename, current->pid, d_path(&(current->mm->exe_file->f_path), buf, 100), count);//, filename);//current->mm->exe_file->f_path);
+        printk(KERN_DEBUG "HIJACKED: read. %s %d %s %d \n", filename, current->pid, d_path(&(current->mm->exe_file->f_path), buffer, 100), (int)count);
     }
     else
     {
@@ -98,11 +103,16 @@ int my_sys_read(unsigned int fd, char * buf, size_t count)
 
 int my_sys_write(unsigned int fd, const char * buf, size_t count)
 {
+    
+    char temp [100];
+    char buffer[100];
+    char *filename;
+    
     spin_lock(&lock);
-    char buf[100];
-    if( filename != 0)
+    filename = d_path(&(fget(fd)->f_path), temp, 100);	
+    if(filename != 0)
     {
-        printk(KERN_DEBUG "HIJACKED: write. %s %d %s\n", filename, current->pid, d_path(&(current->mm->exe_file->f_path), buf, 100));//, filename);//current->mm->exe_file->f_path);
+        printk(KERN_DEBUG "HIJACKED: write. %s %d %s\n", filename, current->pid, d_path(&(current->mm->exe_file->f_path), buffer, 100));//, filename);//current->mm->exe_file->f_path);
     }
     else
     {
