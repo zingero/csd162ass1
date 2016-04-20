@@ -8,17 +8,18 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/proc_fs.h>
+#include <linux/spinlock_types.h>
+
+// Write Protect Bit (CR0:16)
+#define CR0_WP 0x00010000 
 
 static char msg[128];
 static int len = 0;
 static int len_check = 1;
 
-// Write Protect Bit (CR0:16)
-#define CR0_WP 0x00010000 
-
-MODULE_LICENSE("GPL");
-
 void **syscall_table;
+
+spinlock_t lock;
 
 unsigned long **find_sys_call_table(void);
 
@@ -29,7 +30,7 @@ long (*original_listen_call)(int, int);
 long (*original_connect_call)(int, struct sockaddr *, int *);
 long (*original_mount_call)(char *, char *, char *, unsigned long, void *);
 
-int file_monitoring = 1;
+int file_monitoring = 0;
 int net_monitoring = 1;
 int mount_monitoring = 1;
 
@@ -79,7 +80,6 @@ struct file_operations fops =
 .write = simple_proc_write,
 .release = simple_proc_release
 };
-
 
 unsigned long **find_sys_call_table()
 {
@@ -140,21 +140,21 @@ int my_sys_mount(char * dev_name, char * dir_name, char * type, unsigned long fl
     return original_mount_call(dev_name, dir_name, type, flags, data);
 }
 
-static int __init syscall_init(void)
+static int __init init_simpleproc (void)
 {
-    unsigned long cr0;
+  unsigned long cr0;	
+  printk(KERN_INFO "init KMonitorfs\n");
+  
+  syscall_table = (void **) find_sys_call_table();
 
-    syscall_table = (void **) find_sys_call_table();
-
-    	if (! proc_create("KMonitor",0666,NULL,&fops)) 
+	if (! proc_create("KMonitor",0666,NULL,&fops)) 
 	{
 		printk(KERN_INFO "ERROR! proc_create\n");
 		remove_proc_entry("KMonitor",NULL);
 		return -1;
 	}
-
-    
-    if (! syscall_table) 
+	
+	   if (! syscall_table) 
     {
         printk(KERN_DEBUG "ERROR: Cannot find the system call table address.\n"); 
         return -1;
@@ -165,6 +165,8 @@ static int __init syscall_init(void)
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
 
+    //printk(KERN_DEBUG "middle init");
+    
     if(file_monitoring)
     {
 	file_monitoring_hijacked = 1;
@@ -191,18 +193,21 @@ static int __init syscall_init(void)
         original_mount_call = syscall_table[__NR_mount];
 	syscall_table[__NR_mount] = my_sys_mount;
     }
+    //lprintk(KERN_DEBUG "finish init");
     write_cr0(cr0);
-    return 0;
+ 	return 0;	
 }
 
-static void __exit syscall_release(void)
+static void __exit exit_simpleproc(void)
 {
-    unsigned long cr0;
+	   unsigned long cr0;
+  remove_proc_entry("KMonitor",NULL);
+
 
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
 
-    remove_proc_entry("KMonitor",NULL);
+    //remove_proc_entry("KMonitor",NULL);
     
     if(file_monitoring_hijacked)
     {
@@ -223,7 +228,12 @@ static void __exit syscall_release(void)
     }
     printk(KERN_DEBUG "Everything is back to normal\n");
     write_cr0(cr0);
+	printk(KERN_INFO "exit KMonitorfs\n");
 }
 
-module_init(syscall_init);
-module_exit(syscall_release);
+module_init(init_simpleproc);
+module_exit(exit_simpleproc);
+MODULE_AUTHOR("Oshrat Bar and Orian Zinger");
+MODULE_LICENSE("GPL v3");
+MODULE_DESCRIPTION("A simple module to input/output using proc filesystem");
+
