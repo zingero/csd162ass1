@@ -6,12 +6,19 @@
 #include <linux/sched.h>
 #include <linux/version.h>
 
+#include <linux/spinlock_types.h>
+#include <linux/kthread.h>
+#include <linux/net.h>
+#include <linux/socket.h>
 // Write Protect Bit (CR0:16)
 #define CR0_WP 0x00010000 
 
 MODULE_LICENSE("GPL");
 
 void **syscall_table;
+
+spinlock_t lock;
+//spin_lock_init(&lock);
 
 unsigned long **find_sys_call_table(void);
 
@@ -21,6 +28,14 @@ long (*original_write_call)(unsigned int, const char *, size_t);
 long (*original_listen_call)(int, int);
 long (*original_connect_call)(int, struct sockaddr *, int *);
 long (*original_mount_call)(char *, char *, char *, unsigned long, void *);
+
+int file_monitoring = 1;
+int net_monitoring = 1;
+int mount_monitoring = 1;
+
+int file_monitoring_hijacked = 0;
+int net_monitoring_hijacked = 0;
+int mount_monitoring_hijacked = 0;
 
 unsigned long **find_sys_call_table()
 {
@@ -39,7 +54,16 @@ unsigned long **find_sys_call_table()
 
 int my_sys_open(const char *filename, int flags, int mode)
 {
-    printk(KERN_DEBUG "HIJACKED: open\n");
+	spin_lock(&lock);
+  /*  if( filename != 0)
+    {
+        printk(KERN_DEBUG "HIJACKED: open. %s %d\n", filename, current->pid, readlink ("/proc/" current->pid "/exe");
+    }
+    else
+    {
+      printk(KERN_DEBUG "open: file name is null.\n");
+    }*/
+      spin_unlock(&lock);
     return original_open_call(filename, flags, mode);
 }
 
@@ -90,25 +114,32 @@ static int __init syscall_init(void)
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
 
-    original_open_call = syscall_table[__NR_open];
-    original_read_call = syscall_table[__NR_read];
-    original_write_call = syscall_table[__NR_write];
-    original_listen_call = syscall_table[__NR_listen];
-    original_connect_call = syscall_table[__NR_connect];
-    original_mount_call = syscall_table[__NR_mount];
+    if(file_monitoring)
+    {
+	file_monitoring_hijacked = 1;
+	original_open_call = syscall_table[__NR_open];
+	original_read_call = syscall_table[__NR_read];
+	original_write_call = syscall_table[__NR_write];
+	syscall_table[__NR_open] = my_sys_open;
+	syscall_table[__NR_read] = my_sys_read;
+	syscall_table[__NR_write] = my_sys_write;
+    }
 
-    syscall_table[__NR_open] = my_sys_open;
-    printk(KERN_DEBUG "Hijacked open\n");
-    syscall_table[__NR_read] = my_sys_read;
-    printk(KERN_DEBUG "Hijacked read\n");
-    syscall_table[__NR_write] = my_sys_write;
-    printk(KERN_DEBUG "Hijacked write\n");
-    syscall_table[__NR_listen] = my_sys_listen;
-    printk(KERN_DEBUG "Hijacked listen\n");
-    syscall_table[__NR_connect] = my_sys_connect;
-    printk(KERN_DEBUG "Hijacked connect\n");
-    syscall_table[__NR_mount] = my_sys_mount;
-    printk(KERN_DEBUG "Hijacked mount\n");
+    if(net_monitoring)
+    {
+	net_monitoring_hijacked = 1;
+	original_listen_call = syscall_table[__NR_listen];
+	original_connect_call = syscall_table[__NR_connect];	
+	syscall_table[__NR_listen] = my_sys_listen;
+	syscall_table[__NR_connect] = my_sys_connect;
+    }
+
+    if(mount_monitoring)
+    {
+	mount_monitoring_hijacked = 1;
+        original_mount_call = syscall_table[__NR_mount];
+	syscall_table[__NR_mount] = my_sys_mount;
+    }
     write_cr0(cr0);
     return 0;
 }
@@ -120,12 +151,23 @@ static void __exit syscall_release(void)
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
     
-    syscall_table[__NR_open] = original_open_call;
-    syscall_table[__NR_read] = original_read_call;
-    syscall_table[__NR_write] = original_write_call;
-    syscall_table[__NR_listen] = original_listen_call;
-    syscall_table[__NR_connect] = original_connect_call;
-    syscall_table[__NR_mount] = original_mount_call;
+    if(file_monitoring_hijacked)
+    {
+	syscall_table[__NR_open] = original_open_call;
+	syscall_table[__NR_read] = original_read_call;
+	syscall_table[__NR_write] = original_write_call;
+    }
+
+    if(net_monitoring_hijacked)
+    {
+	syscall_table[__NR_listen] = original_listen_call;
+	syscall_table[__NR_connect] = original_connect_call;
+    }
+
+    if(mount_monitoring_hijacked)
+    {
+	syscall_table[__NR_mount] = original_mount_call;
+    }
     printk(KERN_DEBUG "Everything is back to normal\n");
     write_cr0(cr0);
 }
