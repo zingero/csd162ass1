@@ -6,18 +6,28 @@
 #include <linux/sched.h>
 #include <linux/version.h>
 
-#include <linux/spinlock_types.h>
-#include <linux/kthread.h>
-#include <linux/net.h>
-#include <linux/socket.h>
+// #include <linux/spinlock_types.h>
+// #include <linux/kthread.h>
+// #include <linux/net.h>
+// #include <linux/socket.h>
 // Write Protect Bit (CR0:16)
 #define CR0_WP 0x00010000 
 
+/*
+#define NIPQUAD(addr) \
+	((unsigned char *)&addr[0], \
+		((unsigned char *)&addr[0], \
+			((unsigned char *)&addr[0], \
+				((unsigned char *)&addr[0], \
+		)*/
+
+
+			
 MODULE_LICENSE("GPL");
 
 void **syscall_table;
 
-spinlock_t lock;
+// spinlock_t lock;
 //spin_lock_init(&lock);
 
 unsigned long **find_sys_call_table(void);
@@ -55,32 +65,58 @@ unsigned long **find_sys_call_table()
 int my_sys_open(const char *filename, int flags, int mode)
 {
 	spin_lock(&lock);
-  /*  if( filename != 0)
+	char buf[100];
+
+    if( filename != 0)
     {
-        printk(KERN_DEBUG "HIJACKED: open. %s %d\n", filename, current->pid, readlink ("/proc/" current->pid "/exe");
+        printk(KERN_DEBUG "HIJACKED: open. %s %d %s\n", filename, current->pid, d_path(&(current->mm->exe_file->f_path), buf, 100));
     }
     else
     {
       printk(KERN_DEBUG "open: file name is null.\n");
-    }*/
-      spin_unlock(&lock);
+    }
+    spin_unlock(&lock);
     return original_open_call(filename, flags, mode);
 }
 
 int my_sys_read(unsigned int fd, char * buf, size_t count)
 {
-    printk(KERN_DEBUG "HIJACKED: read\n");
+    
+    spin_lock(&lock);
+    char buf[100];
+    if( filename != 0)
+    {
+        printk(KERN_DEBUG "HIJACKED: read. %s %d %s %d \n", filename, current->pid, d_path(&(current->mm->exe_file->f_path), buf, 100), count);//, filename);//current->mm->exe_file->f_path);
+    }
+    else
+    {
+      printk(KERN_DEBUG "read: file name is null.\n");
+    }
+    spin_unlock(&lock);
     return original_read_call(fd, buf, count);
 }
 
 int my_sys_write(unsigned int fd, const char * buf, size_t count)
 {
-    printk(KERN_DEBUG "HIJACKED: write\n");
+    spin_lock(&lock);
+    char buf[100];
+    if( filename != 0)
+    {
+        printk(KERN_DEBUG "HIJACKED: write. %s %d %s\n", filename, current->pid, d_path(&(current->mm->exe_file->f_path), buf, 100));//, filename);//current->mm->exe_file->f_path);
+    }
+    else
+    {
+      printk(KERN_DEBUG "write: file name is null.\n");
+    }
+    spin_unlock(&lock);
     return original_write_call(fd, buf, count);
 }
 
 int my_sys_listen(int fd, int backlog)
 {
+	//unsigned char *addr = (unsigned char*)sk_buff->addr;
+	//printk(KERN_DEBUG "IP = %pI4\n", &ip);
+
     printk(KERN_DEBUG "HIJACKED: listen\n");
     return original_listen_call(fd, backlog);
 }
