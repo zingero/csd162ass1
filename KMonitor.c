@@ -32,10 +32,12 @@ long (*original_listen_call)(int, int);
 long (*original_connect_call)(int, struct sockaddr *, int *);
 long (*original_mount_call)(char *, char *, char *, unsigned long, void *);
 
+/* monitoring flags */
 int file_monitoring = 0;
 int net_monitoring = 0;
 int mount_monitoring = 0;
 
+/* our system calls. executing by demand and returning the defined data. */
 int my_sys_open(const char *filename, int flags, int mode)
 {
     if(file_monitoring)  
@@ -54,19 +56,45 @@ int my_sys_open(const char *filename, int flags, int mode)
 }
 
 int my_sys_read(unsigned int fd, char * buf, size_t count)
-{   
-    if(file_monitoring)  
-    {
-	printk(KERN_DEBUG "HIJACKED: read\n");
+{
+    if(file_monitoring){
+        char temp [100];
+        char buffer[100];
+        char *filename;
+        
+        spin_lock(&lock);
+        filename = d_path(&(fget(fd)->f_path), temp, 100);
+        if(filename != 0)
+        {
+            printk(KERN_DEBUG "HIJACKED: read. %s %d %s %d \n", filename, current->pid, d_path(&(current->mm->exe_file->f_path), buffer, 100), (int)count);
+        }
+        else
+        {
+          printk(KERN_DEBUG "read: file name is null.\n");
+        }
+        spin_unlock(&lock);
     }
     return original_read_call(fd, buf, count);
 }
 
 int my_sys_write(unsigned int fd, const char * buf, size_t count)
 {
-    if(file_monitoring)  
-    {
-	printk(KERN_DEBUG "HIJACKED: write\n");
+    if(file_monitoring){
+        char temp [100];
+        char buffer[100];
+        char *filename;
+        
+        spin_lock(&lock);
+        filename = d_path(&(fget(fd)->f_path), temp, 100);	
+        if(filename != 0)
+        {
+            printk(KERN_DEBUG "HIJACKED: write. %s %d %s\n", filename, current->pid, d_path(&(current->mm->exe_file->f_path), buffer, 100));//, filename);//current->mm->exe_file->f_path);
+        }
+        else
+        {
+          printk(KERN_DEBUG "write: file name is null.\n");
+        }
+        spin_unlock(&lock);
     }
     return original_write_call(fd, buf, count);
 }
@@ -125,6 +153,7 @@ ssize_t simple_proc_read(struct file *sp_file,char __user *buf, size_t size, lof
 	return len;
 }
 
+/* write controling: parsing user preferences and LKM definition*/
 ssize_t simple_proc_write(struct file *sp_file,const char __user *buf, size_t size, loff_t *offset)
 {
 	printk(KERN_INFO "proc called write %d\n",(int)size);
