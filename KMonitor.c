@@ -21,6 +21,8 @@ void **syscall_table;
 
 spinlock_t lock;
 
+int fork(void);
+
 unsigned long **find_sys_call_table(void);
 
 long (*original_open_call)(const char *, int, int);
@@ -34,51 +36,65 @@ int file_monitoring = 0;
 int net_monitoring = 0;
 int mount_monitoring = 0;
 
-int file_monitoring_hijacked = 0;
-int net_monitoring_hijacked = 0;
-int mount_monitoring_hijacked = 0;
-
 int my_sys_open(const char *filename, int flags, int mode)
 {
-    char buf[100];
-    if(filename != 0)
+    if(file_monitoring)  
     {
-        printk(KERN_DEBUG "HIJACKED: open. %s %d %s\n", filename, current->pid,	d_path(&(current->mm->exe_file->f_path), buf, 100));
-    }
-    else
-    {
-      printk(KERN_DEBUG "open: file name is null.\n");
+	char buf[100];
+	if(filename != 0)
+	{
+	    printk(KERN_DEBUG "HIJACKED: open. %s %d %s\n", filename, current->pid,	d_path(&(current->mm->exe_file->f_path), buf, 100));
+	}
+	else
+	{
+	    printk(KERN_DEBUG "open: file name is null.\n");
+	}
     }
     return original_open_call(filename, flags, mode);
 }
 
 int my_sys_read(unsigned int fd, char * buf, size_t count)
 {   
-    printk(KERN_DEBUG "HIJACKED: read\n");
+    if(file_monitoring)  
+    {
+	printk(KERN_DEBUG "HIJACKED: read\n");
+    }
     return original_read_call(fd, buf, count);
 }
 
 int my_sys_write(unsigned int fd, const char * buf, size_t count)
 {
-    printk(KERN_DEBUG "HIJACKED: write\n");
+    if(file_monitoring)  
+    {
+	printk(KERN_DEBUG "HIJACKED: write\n");
+    }
     return original_write_call(fd, buf, count);
 }
 
 int my_sys_listen(int fd, int backlog)
 {
-    printk(KERN_DEBUG "HIJACKED: listen\n");
+    if(net_monitoring)
+    {
+	printk(KERN_DEBUG "HIJACKED: listen\n");
+    }
     return original_listen_call(fd, backlog);
 }
 
 int my_sys_connect(int fd, struct sockaddr * uservaddr, int * addrlen)
 {
-    printk(KERN_DEBUG "HIJACKED: connect\n");
+    if(net_monitoring)
+    {
+	printk(KERN_DEBUG "HIJACKED: connect\n");
+    }
     return original_connect_call(fd, uservaddr, addrlen);
 }
 
 int my_sys_mount(char * dev_name, char * dir_name, char * type, unsigned long flags, void * data)
 {
-    printk(KERN_DEBUG "HIJACKED: mount\n");
+    if(mount_monitoring)
+    {
+	printk(KERN_DEBUG "HIJACKED: mount\n");
+    }
     return original_mount_call(dev_name, dir_name, type, flags, data);
 }
 
@@ -112,85 +128,61 @@ ssize_t simple_proc_read(struct file *sp_file,char __user *buf, size_t size, lof
 ssize_t simple_proc_write(struct file *sp_file,const char __user *buf, size_t size, loff_t *offset)
 {
 	printk(KERN_INFO "proc called write %d\n",(int)size);
+	if(size > 11)
+	{
+	    printk(KERN_DEBUG "Error: cannot parse string. Too many characters.\n");
+	    return -1;
+	}
 	len = size;
 	copy_from_user(msg,buf,len);
-	
 	switch(*msg)
-	{
-	  case 'F':
-	    printk(KERN_DEBUG "in F\n");
-	    if(*(msg + 8) == '1')
-	    {
-	      printk(KERN_DEBUG "in F if\n");
-	      file_monitoring = 1;
-	      syscall_table[__NR_open] = my_sys_open;
-	      syscall_table[__NR_read] = my_sys_read;
-	      syscall_table[__NR_write] = my_sys_write;
-	    }
-	    else // 0
-	    {
-		printk(KERN_DEBUG "in F else\n");
-		file_monitoring = 0;
-	      	syscall_table[__NR_open] = original_open_call;
-		syscall_table[__NR_read] = original_read_call;
-		syscall_table[__NR_write] = original_write_call;
-	    }
-	    break;
-	  case 'N':
-	    if(*(msg + 7) == '1')
-	    {
-		net_monitoring = 1; 
-	      	syscall_table[__NR_listen] = my_sys_listen;
-		syscall_table[__NR_connect] = my_sys_connect;
-    
-	    }
-	    else // 0
-	    {
-		net_monitoring = 0;
-		syscall_table[__NR_listen] = original_listen_call;
-		syscall_table[__NR_connect] = original_connect_call;
-	    }
-	    break;
-	  case 'M':
-	    if(*(msg + 9) == '1')
-	    {
-		mount_monitoring = 1; 
-		syscall_table[__NR_mount] = my_sys_mount;      
-	    }
-	    else // 0
-	    {
-		mount_monitoring = 0;
-		syscall_table[__NR_mount] = original_mount_call;
-	    }
-	    break;
+	{	
+	    case 'F':
+		if(*(msg + 8) == '1')
+		{
+		  file_monitoring = 1;
+		}
+		else if(*(msg + 8) == '0')
+		{
+		    file_monitoring = 0;
+		}
+		else
+		{
+		    printk(KERN_DEBUG "Error: cannot parse string.\n");
+		}
+		break;
+	    case 'N':
+		if(*(msg + 7) == '1')
+		{
+		    net_monitoring = 1; 
+		}
+		else if(*(msg + 7) == '0')
+		{
+		    net_monitoring = 0;
+		}
+		else
+		{
+		    printk(KERN_DEBUG "Error: cannot parse string.\n");
+		}
+		break;
+	    case 'M':
+		if(*(msg + 9) == '1')
+		{
+		    mount_monitoring = 1; 
+		}
+		else if(*(msg + 9) == '0')
+		{
+		    mount_monitoring = 0;
+		}
+		else
+		{
+		    printk(KERN_DEBUG "Error: cannot parse string.\n");
+		}
+		break;
 	    default:
-	      printk(KERN_DEBUG "Error: cannot parse string.\n");
+		printk(KERN_DEBUG "Error: cannot parse string.\n");
 	}
-	
-	/*switch(*msg)
-	{
-	  case "FileMon 1\n":
-	    file_monitoring = 1;
-	    break;
-	  case "NetMon 1\n":
-	    net_monitoring = 1;
-	    break;
-	  case "MountMon 1\n":
-	    mount_monitoring = 1;
-	    break;
-	  case "FileMon 0\n":
-	    file_monitoring = 0;
-	    break;
-	  case "NetMon 0\n":
-	    net_monitoring = 0;
-	    break;
-	  case "MountMon 0\n":
-	    mount_monitoring = 0;
-	    break;
-	  defualt:
-	    printk(KERN_DEBUG "Error: cannot parse string.\n");
-	}*/
-	return len;
+    return len;
 }
 
 struct file_operations fops = 
@@ -240,16 +232,22 @@ static int __init init_simpleproc (void)
 
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
-    
+
     original_open_call = syscall_table[__NR_open];
     original_read_call = syscall_table[__NR_read];
     original_write_call = syscall_table[__NR_write];
     original_listen_call = syscall_table[__NR_listen];
     original_connect_call = syscall_table[__NR_connect];	
     original_mount_call = syscall_table[__NR_mount];
-
+    syscall_table[__NR_open] = my_sys_open;
+    syscall_table[__NR_read] = my_sys_read;
+    syscall_table[__NR_write] = my_sys_write;
+    syscall_table[__NR_listen] = my_sys_listen;
+    syscall_table[__NR_connect] = my_sys_connect;
+    syscall_table[__NR_mount] = my_sys_mount;
+    
     write_cr0(cr0);
- 	return 0;	
+    return 0;	
 }
 
 static void __exit exit_simpleproc(void)
@@ -259,32 +257,21 @@ static void __exit exit_simpleproc(void)
 
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
-    
-    if(file_monitoring)
-    {
-	syscall_table[__NR_open] = original_open_call;
-	syscall_table[__NR_read] = original_read_call;
-	syscall_table[__NR_write] = original_write_call;
-    }
+    syscall_table[__NR_open] = original_open_call;
+    syscall_table[__NR_read] = original_read_call;
+    syscall_table[__NR_write] = original_write_call;
+    syscall_table[__NR_listen] = original_listen_call;
+    syscall_table[__NR_connect] = original_connect_call;
+    syscall_table[__NR_mount] = original_mount_call;
 
-    if(net_monitoring)
-    {
-	syscall_table[__NR_listen] = original_listen_call;
-	syscall_table[__NR_connect] = original_connect_call;
-    }
-
-    if(mount_monitoring)
-    {
-	syscall_table[__NR_mount] = original_mount_call;
-    }
     printk(KERN_DEBUG "Everything is back to normal\n");
     write_cr0(cr0);
-	printk(KERN_INFO "exit KMonitorfs\n");
+    printk(KERN_INFO "exit KMonitorfs\n");
 }
 
 module_init(init_simpleproc);
 module_exit(exit_simpleproc);
 MODULE_AUTHOR("Oshrat Bar and Orian Zinger");
 MODULE_LICENSE("GPL v3");
-MODULE_DESCRIPTION("A simple module to input/output using proc filesystem");
+MODULE_DESCRIPTION("A module to monitor system calls using proc filesystem");
 
