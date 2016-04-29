@@ -14,8 +14,6 @@
 // Write Protect Bit (CR0:16)
 #define CR0_WP 0x00010000 
 
-#define MAX_EVENTS 10
-
 static char msg[128];
 static int len = 0;
 static int len_check = 1;
@@ -23,6 +21,8 @@ static int len_check = 1;
 void **syscall_table;
 
 spinlock_t lock;
+
+int fork(void);
 
 unsigned long **find_sys_call_table(void);
 
@@ -37,41 +37,6 @@ long (*original_mount_call)(char *, char *, char *, unsigned long, void *);
 int file_monitoring = 0;
 int net_monitoring = 0;
 int mount_monitoring = 0;
-
-/*MAX_EVENTS stands for the maximum number of elements Queue can hold.
-  num_of_events stands for the current size of the Queue.
-  events is the array of elements. 
- */
-int num_of_events = 0;
-char *events[MAX_EVENTS];
-
-void dequeue(void)
-{
-    int i;
-    if(num_of_events == 0)
-    {
-	    return;
-    }
-    else
-    {
-    	for(i = 1 ; i < MAX_EVENTS ; ++i)
-    	{
-    		events[i-1] = events[i];
-    	}
-	    num_of_events--;
-    	events[num_of_events] = "";
-    }
-}
-
-void enqueue(char *event)
-{
-    if(num_of_events == MAX_EVENTS)
-    {
-		dequeue();
-    }
-    events[num_of_events] = event;
-    num_of_events++;
-}
 
 /* our system calls. executing by demand and returning the defined data. */
 int my_sys_open(const char *filename, int flags, int mode)
@@ -92,12 +57,11 @@ int my_sys_open(const char *filename, int flags, int mode)
 }
 
 int my_sys_read(unsigned int fd, char * buf, size_t count)
-{   
-    if(file_monitoring)  
-    {
-		char temp [100];
+{
+    if(file_monitoring){
+        char temp [100];
         char buffer[100];
-        char *filename = 0;
+        char *filename;
         
         spin_lock(&lock);
         filename = d_path(&(fget(fd)->f_path), temp, 100);
@@ -116,11 +80,11 @@ int my_sys_read(unsigned int fd, char * buf, size_t count)
 
 int my_sys_write(unsigned int fd, const char * buf, size_t count)
 {
-    if(file_monitoring)  
-    {
-		char temp [100];
+    if(file_monitoring){
+        char temp [100];
         char buffer[100];
-        char *filename = 0;
+        char *filename;
+        
         spin_lock(&lock);
         filename = d_path(&(fget(fd)->f_path), temp, 100);	
         if(filename != 0)
@@ -140,7 +104,7 @@ int my_sys_listen(int fd, int backlog)
 {
     if(net_monitoring)
     {
-		printk(KERN_DEBUG "HIJACKED: listen\n");
+	printk(KERN_DEBUG "HIJACKED: listen\n");
     }
     return original_listen_call(fd, backlog);
 }
@@ -149,7 +113,7 @@ int my_sys_connect(int fd, struct sockaddr * uservaddr, int * addrlen)
 {
     if(net_monitoring)
     {
-		printk(KERN_DEBUG "HIJACKED: connect\n");
+	printk(KERN_DEBUG "HIJACKED: connect\n");
     }
     return original_connect_call(fd, uservaddr, addrlen);
 }
@@ -158,48 +122,26 @@ int my_sys_mount(char * dev_name, char * dir_name, char * type, unsigned long fl
 {
     if(mount_monitoring)
     {
-		printk(KERN_DEBUG "HIJACKED: mount\n");
+    	char buffer[100];
+    	spin_lock(&lock);
+		printk(KERN_DEBUG "HIJACKED: mount. %s %s %s %d %s\n", dev_name, type, dir_name, current->pid, d_path(&(current->mm->exe_file->f_path), buffer, 100));
+    	spin_unlock(&lock);
     }
     return original_mount_call(dev_name, dir_name, type, flags, data);
 }
 
-int fops_open(struct inode * sp_inode, struct file *sp_file)
+int simple_proc_open(struct inode * sp_inode, struct file *sp_file)
 {
-	// printk(KERN_INFO "proc called open\n");
+	printk(KERN_INFO "proc called open\n");
 	return 0;
 }
-int fops_release(struct inode *sp_indoe, struct file *sp_file)
+int simple_proc_release(struct inode *sp_indoe, struct file *sp_file)
 {
-	// printk(KERN_INFO "proc called release\n");
+	printk(KERN_INFO "proc called release\n");
 	return 0;
 }
 
-void print_events(void)
-{
-	int i = 0;
-	for(; i < num_of_events ; ++i)
-	{
-		printk(KERN_INFO "%s\n", events[i]);
-	}
-}
-
-void print_conf(void)
-{
-	if(file_monitoring)
-		printk(KERN_INFO "File Monitoring - Enabled\n");
-	else
-		printk(KERN_INFO "File Monitoring - Disabled\n");
-	if(net_monitoring)
-		printk(KERN_INFO "Net Monitoring - Enabled\n");
-	else
-		printk(KERN_INFO "Net Monitoring - Disabled\n");
-	if(mount_monitoring)
-		printk(KERN_INFO "Mount Monitoring - Enabled\n");
-	else
-		printk(KERN_INFO "Mount Monitoring - Disabled\n");
-}
-
-ssize_t fops_read(struct file *sp_file,char __user *buf, size_t size, loff_t *offset)
+ssize_t simple_proc_read(struct file *sp_file,char __user *buf, size_t size, loff_t *offset)
 {
 	if (len_check)
 	 len_check = 0;
@@ -209,16 +151,14 @@ ssize_t fops_read(struct file *sp_file,char __user *buf, size_t size, loff_t *of
 	 	return 0;
 	}
 
+	printk(KERN_INFO "proc called read %d\n",(int)size);
 	copy_to_user(buf,msg,len);
-	printk(KERN_INFO "KMonitor - Last Events:\n");
-	print_events();
-	printk(KERN_INFO "KMonitor Current Configuration:\n");
-	print_conf();
+	//printk(KERN_INFO "buf=%s. msg=%s.\n", buf, msg);
 	return len;
 }
 
 /* write controling: parsing user preferences and LKM definition*/
-ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, loff_t *offset)
+ssize_t simple_proc_write(struct file *sp_file,const char __user *buf, size_t size, loff_t *offset)
 {
 	printk(KERN_INFO "proc called write %d\n",(int)size);
 	if(size > 11)
@@ -280,10 +220,10 @@ ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, lof
 
 struct file_operations fops = 
 {
-.open = fops_open,
-.read = fops_read,
-.write = fops_write,
-.release = fops_release
+.open = simple_proc_open,
+.read = simple_proc_read,
+.write = simple_proc_write,
+.release = simple_proc_release
 };
 
 unsigned long **find_sys_call_table()
@@ -315,7 +255,7 @@ static int __init init_simpleproc (void)
 		return -1;
 	}
 	
-    if (! syscall_table) 
+	   if (! syscall_table) 
     {
         printk(KERN_DEBUG "ERROR: Cannot find the system call table address.\n"); 
         return -1;
