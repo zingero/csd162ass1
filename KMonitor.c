@@ -13,6 +13,10 @@
 #include <linux/times.h>
 #include <linux/timekeeping.h>
 #include <linux/rtc.h>
+#include <linux/net.h>
+#include <linux/slab.h>
+#include <net/inet_sock.h>
+
 
 // Write Protect Bit (CR0:16)
 #define CR0_WP 0x00010000 
@@ -155,9 +159,46 @@ int my_sys_listen(int fd, int backlog)
 {
     if(net_monitoring)
     {
-    	get_time();
-		printk(KERN_INFO "HIJACKED: listen %04d.%02d.%02d %02d:%02d:%02d, \n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
-    }
+
+    	struct socket *socket;
+		int port;
+		int ip;
+
+		struct sock *sk;
+		char buffer[100];
+		struct inet_sock *inet;
+	//	struct tcphdr *tcp_header; 
+		socket = sockfd_lookup(fd, 0);
+		 if(socket){ 
+		 	sk = socket->sk;
+		 	if(sk){//} && sk->sk_family){}// == AF_INET){ //ipv4
+			 	inet = inet_sk(sk);
+		   		port = ntohs(inet->inet_sport);
+		   		ip = inet->inet_saddr;
+		   
+		    	get_time();
+				printk(KERN_INFO "HIJACKED: listen %04d.%02d.%02d %02d:%02d:%02d, %d %d %d %s\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, port, ip, current->pid, d_path(&(current->mm->exe_file->f_path), buffer, 100));
+		   		}//*/
+	    	else{
+	    		printk(KERN_DEBUG "wrong socket type\n");
+	    	}
+
+	    	/*
+	    	~~ incase we'll want to print the ip address in "an ip way" ~~
+	    	 case AF_INET: { 
+316                                 struct inet_sock *inet = inet_sk(sk);
+317 
+318                                print_ipv4_addr(ab, inet->inet_rcv_saddr,
+319                                                 inet->inet_sport,
+320                                                 "laddr", "lport");
+321                                 print_ipv4_addr(ab, inet->inet_daddr,
+322                                                 inet->inet_dport,
+323                                                 "faddr", "fport");*/
+		}
+		else{
+	    	printk(KERN_DEBUG "socket is null\n");	
+	    }
+	}
     return original_listen_call(fd, backlog);
 }
 
