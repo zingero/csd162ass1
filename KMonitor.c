@@ -32,6 +32,7 @@
 #define CR0_WP 0x00010000 
 
 #define MAX_EVENTS 10
+#define BUF_SIZE 128
 
 static char msg[128];
 static int len = 0;
@@ -51,7 +52,7 @@ long (*original_accept_call)(int, struct sockaddr *, int *);
 long (*original_mount_call)(char *, char *, char *, unsigned long, void *);
 
 /* monitoring flags */
-int file_monitoring = 0;
+int file_monitoring = 1;
 int net_monitoring = 0;
 int mount_monitoring = 0;
 
@@ -60,7 +61,7 @@ int mount_monitoring = 0;
   events is the array of elements. 
  */
 int num_of_events = 0;
-char *events[MAX_EVENTS];
+char events[MAX_EVENTS][BUF_SIZE];
 
 struct rtc_time tm;
 struct timeval time;
@@ -76,6 +77,7 @@ void get_time(void)
 void dequeue(void)
 {
     int i;
+    char empty_string[128] = {'\0'};
     if(num_of_events == 0)
     {
 	    return;
@@ -84,10 +86,10 @@ void dequeue(void)
     {
     	for(i = 1 ; i < MAX_EVENTS ; ++i)
     	{
-    		events[i-1] = events[i];
+    		strcpy(events[i-1], events[i]);
     	}
 	    num_of_events--;
-    	events[num_of_events] = "";
+    	strcpy(events[num_of_events], empty_string);
     }
 }
 
@@ -97,21 +99,25 @@ void enqueue(char *event)
     {
 		dequeue();
     }
-    events[num_of_events] = event;
+    strcpy(events[num_of_events], event);
     num_of_events++;
 }
 
 /* our system calls. executing by demand and returning the defined data. */
 int my_sys_open(const char *filename, int flags, int mode)
 {
-    if(file_monitoring)  
+    if(file_monitoring)
     {
-		char temp[100]; // we need this array only to get the path.
+		char temp[128]; // we need this array only to get the path.
     	// spin_lock(&lock);
+    	char str[128];
     	get_time();
 		if(filename != 0)
 		{
-		    printk(KERN_DEBUG "%04d.%02d.%02d %02d:%02d:%02d, open %s %d %s\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, filename, current->pid,	d_path(&(current->mm->exe_file->f_path), temp, 100));
+		    sprintf(str, "%04d.%02d.%02d %02d:%02d:%02d, open %s %d %s\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, 
+		    	filename, current->pid,	d_path(&(current->mm->exe_file->f_path), temp, 128));
+		    printk(KERN_INFO "%s", str);
+		    enqueue(str);
 		}
 		else
 		{
