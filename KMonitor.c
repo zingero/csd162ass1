@@ -131,15 +131,20 @@ int my_sys_read(unsigned int fd, char * buf, size_t count)
 {   
     if(file_monitoring)  
     {
-		char temp[100]; // we need this array only to get the paths
+		char temp[128]; // we need this array only to get the paths
         char *filename = 0;
+        char str[128];
 		get_time();
         
         spin_lock(&lock);
         filename = d_path(&(fget(fd)->f_path), temp, 100);
         if(filename != 0)
         {
-            printk(KERN_INFO "%04d.%02d.%02d %02d:%02d:%02d, read %s %d %s %d \n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, filename, current->pid, d_path(&(current->mm->exe_file->f_path), temp, 100), (int)count);
+            sprintf(str, "%04d.%02d.%02d %02d:%02d:%02d, read %s %d %s %d \n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, 
+            	filename, current->pid, d_path(&(current->mm->exe_file->f_path), temp, 128), (int)count);
+		    	
+		    printk(KERN_INFO "%s", str);
+		    enqueue(str);
         }
         else
         {
@@ -157,6 +162,7 @@ int my_sys_write(unsigned int fd, const char * buf, size_t count)
 		char temp [128]; // we need this array only to get the paths
 		char tmp[128]; // we need this array only to get the paths
         char *filename = 0;
+        char str[128];
 		struct file *file;
     	get_time();
         spin_lock(&lock);
@@ -167,9 +173,11 @@ int my_sys_write(unsigned int fd, const char * buf, size_t count)
 
         if(filename != 0)
         {
-            printk(KERN_INFO "%04d.%02d.%02d %02d:%02d:%02d, write %s %d %s\n",
+        	sprintf(str, "%04d.%02d.%02d %02d:%02d:%02d, write %s %d %s\n",
              					tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
              					filename, current->pid, d_path(&(current->mm->exe_file->f_path), temp, 128));
+		    printk(KERN_INFO "%s", str);
+		    enqueue(str);
         }
         else
         {
@@ -186,6 +194,7 @@ int my_sys_listen(int fd, int backlog)
     {
     	struct file * struct_file;
     	struct socket *socket;
+    	char str[128];
 		int port = 0;
 		// int ip = 0;	
 		struct sock *sk;
@@ -201,8 +210,11 @@ int my_sys_listen(int fd, int backlog)
 		 	if(sk)
 		 	{
 		   		port = (le16_to_cpu((sk->__sk_common.skc_portpair)>>16));
-		   		printk(KERN_INFO "%04d.%02d.%02d %02d:%02d:%02d, listen %pI4:%d %d %s\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
-		   											 (&(sk->__sk_common.skc_addrpair)), port, current->pid, d_path(&(current->mm->exe_file->f_path), temp, 128));
+			   	sprintf(str, "%04d.%02d.%02d %02d:%02d:%02d, listen %pI4:%d %d %s\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
+		   				(&(sk->__sk_common.skc_addrpair)), port, current->pid, d_path(&(current->mm->exe_file->f_path), temp, 128));
+		   	
+		    printk(KERN_INFO "%s", str);
+		    enqueue(str);
 		   	}
 	    	else
 	    	{
@@ -222,6 +234,7 @@ int my_sys_accept(int fd, struct sockaddr * uservaddr, int * addrlen)
 	struct file *struct_file;
     struct socket *socket;
     struct sock *sk;
+    char str[128];
     // int pflag;
     int new_fd = 0;
     // char* pname, *p;
@@ -236,7 +249,11 @@ int my_sys_accept(int fd, struct sockaddr * uservaddr, int * addrlen)
 	    struct_file = (current->files->fdt->fd[new_fd]);
 	    socket = (struct socket*) struct_file->private_data;
 	    sk = socket->sk;
-		printk(KERN_INFO "%04d.%02d.%02d %02d:%02d:%02d, accept %d %s %pI4 %d\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, current->pid, d_path(&(current->mm->exe_file->f_path), temp, 128), (&(sk->__sk_common.skc_addrpair)), (le16_to_cpu((sk->__sk_common.skc_portpair)>>16)));
+
+		sprintf(str, "%04d.%02d.%02d %02d:%02d:%02d, accept %d %s %pI4 %d\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, current->pid, d_path(&(current->mm->exe_file->f_path), temp, 128), (&(sk->__sk_common.skc_addrpair)), (le16_to_cpu((sk->__sk_common.skc_portpair)>>16)));
+		printk(KERN_INFO "%s", str);
+		enqueue(str);
+
     }
     printk(KERN_INFO "MY SYS ACCEPT ENDS\n");
     return new_fd;
@@ -247,9 +264,15 @@ int my_sys_mount(char * dev_name, char * dir_name, char * type, unsigned long fl
     if(mount_monitoring)
     {
 		char temp[100];
+		char str[128];
 		get_time();
 		spin_lock(&lock);
-		printk(KERN_DEBUG "%04d.%02d.%02d %02d:%02d:%02d, %s %s %s %d %s\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, dev_name, type, dir_name, current->pid, d_path(&(current->mm->exe_file->f_path), temp, 100));
+
+
+		sprintf(str, "%04d.%02d.%02d %02d:%02d:%02d, %s %s %s %d %s\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, dev_name, type, dir_name, current->pid, d_path(&(current->mm->exe_file->f_path), temp, 100));
+		printk(KERN_INFO "%s", str);
+		enqueue(str);
+
     	spin_unlock(&lock);
     }
     return original_mount_call(dev_name, dir_name, type, flags, data);
