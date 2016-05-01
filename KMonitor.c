@@ -17,6 +17,16 @@
 #include <linux/slab.h>
 #include <net/inet_sock.h>
 
+#include <linux/slab.h>
+#include <linux/mm_types.h>
+#include <linux/fs.h>
+#include <linux/fdtable.h>
+#include <linux/dcache.h>
+#include <linux/socket.h>
+#include <linux/net.h>
+#include <linux/in.h>
+#include <asm/uaccess.h>
+#include <linux/string.h>
 
 // Write Protect Bit (CR0:16)
 #define CR0_WP 0x00010000 
@@ -37,13 +47,13 @@ long (*original_open_call)(const char *, int, int);
 long (*original_read_call)(unsigned int, char *, size_t);
 long (*original_write_call)(unsigned int, const char *, size_t);
 long (*original_listen_call)(int, int);
-long (*original_connect_call)(int, struct sockaddr *, int *);
+long (*original_accept_call)(int, struct sockaddr *, int *);
 long (*original_mount_call)(char *, char *, char *, unsigned long, void *);
 
 /* monitoring flags */
 int file_monitoring = 0;
 int net_monitoring = 0;
-int mount_monitoring = 1; // TODO CHANGE TO ZERO
+int mount_monitoring = 0;
 
 /*MAX_EVENTS stands for the maximum number of elements Queue can hold.
   num_of_events stands for the current size of the Queue.
@@ -97,10 +107,11 @@ int my_sys_open(const char *filename, int flags, int mode)
     if(file_monitoring)  
     {
 		char temp[100]; // we need this array only to get the path.
+    	// spin_lock(&lock);
     	get_time();
 		if(filename != 0)
 		{
-		    printk(KERN_INFO "%04d.%02d.%02d %02d:%02d:%02d, %s %d %s\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, filename, current->pid,	d_path(&(current->mm->exe_file->f_path), temp, 100));
+		    printk(KERN_DEBUG "%04d.%02d.%02d %02d:%02d:%02d, open %s %d %s\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, filename, current->pid,	d_path(&(current->mm->exe_file->f_path), temp, 100));
 		}
 		else
 		{
@@ -122,7 +133,7 @@ int my_sys_read(unsigned int fd, char * buf, size_t count)
         filename = d_path(&(fget(fd)->f_path), temp, 100);
         if(filename != 0)
         {
-            printk(KERN_INFO "%04d.%02d.%02d %02d:%02d:%02d, %s %d %s %d \n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, filename, current->pid, d_path(&(current->mm->exe_file->f_path), temp, 100), (int)count);
+            printk(KERN_INFO "%04d.%02d.%02d %02d:%02d:%02d, read %s %d %s %d \n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, filename, current->pid, d_path(&(current->mm->exe_file->f_path), temp, 100), (int)count);
         }
         else
         {
@@ -137,14 +148,22 @@ int my_sys_write(unsigned int fd, const char * buf, size_t count)
 {
     if(file_monitoring)  
     {
-		char temp [100]; // we need this array only to get the paths
+		char temp [128]; // we need this array only to get the paths
+		char tmp[128]; // we need this array only to get the paths
         char *filename = 0;
+		struct file *file;
     	get_time();
         spin_lock(&lock);
-        filename = d_path(&(fget(fd)->f_path), temp, 100);	
+        
+        file = fget(fd);
+        filename = d_path(&(file->f_path), tmp, 128);
+		fput(file);
+
         if(filename != 0)
         {
-            printk(KERN_INFO "%04d.%02d.%02d %02d:%02d:%02d, %s %d %s\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, filename, current->pid, d_path(&(current->mm->exe_file->f_path), temp, 100));
+            printk(KERN_INFO "%04d.%02d.%02d %02d:%02d:%02d, write %s %d %s\n",
+             					tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
+             					filename, current->pid, d_path(&(current->mm->exe_file->f_path), temp, 128));
         }
         else
         {
@@ -159,57 +178,62 @@ int my_sys_listen(int fd, int backlog)
 {
     if(net_monitoring)
     {
-
+    	struct file * struct_file;
     	struct socket *socket;
-		int port;
-		int ip;
-
+		int port = 0;
+		// int ip = 0;	
 		struct sock *sk;
-		char buffer[100];
-		struct inet_sock *inet;
-	//	struct tcphdr *tcp_header; 
-		socket = sockfd_lookup(fd, 0);
-		 if(socket){ 
+		char temp[128];
+		// struct inet_sock *inet;
+    	get_time();
+
+		struct_file = (current->files->fdt->fd[fd]);
+    	socket = (struct socket*) struct_file->private_data;
+		if(socket)
+		{ 
 		 	sk = socket->sk;
-		 	if(sk){//} && sk->sk_family){}// == AF_INET){ //ipv4
-			 	inet = inet_sk(sk);
-		   		port = ntohs(inet->inet_sport);
-		   		ip = inet->inet_saddr;
-		   
-		    	get_time();
-				printk(KERN_INFO "HIJACKED: listen %04d.%02d.%02d %02d:%02d:%02d, %d %d %d %s\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, port, ip, current->pid, d_path(&(current->mm->exe_file->f_path), buffer, 100));
-		   		}//*/
-	    	else{
+		 	if(sk)
+		 	{
+		   		port = (le16_to_cpu((sk->__sk_common.skc_portpair)>>16));
+		   		printk(KERN_INFO "%04d.%02d.%02d %02d:%02d:%02d, listen %pI4:%d %d %s\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
+		   											 (&(sk->__sk_common.skc_addrpair)), port, current->pid, d_path(&(current->mm->exe_file->f_path), temp, 128));
+		   	}
+	    	else
+	    	{
 	    		printk(KERN_DEBUG "wrong socket type\n");
 	    	}
-
-	    	/*
-	    	~~ incase we'll want to print the ip address in "an ip way" ~~
-	    	 case AF_INET: { 
-316                                 struct inet_sock *inet = inet_sk(sk);
-317 
-318                                print_ipv4_addr(ab, inet->inet_rcv_saddr,
-319                                                 inet->inet_sport,
-320                                                 "laddr", "lport");
-321                                 print_ipv4_addr(ab, inet->inet_daddr,
-322                                                 inet->inet_dport,
-323                                                 "faddr", "fport");*/
 		}
-		else{
+		else
+		{
 	    	printk(KERN_DEBUG "socket is null\n");	
 	    }
-	}
+    }
     return original_listen_call(fd, backlog);
 }
 
-int my_sys_connect(int fd, struct sockaddr * uservaddr, int * addrlen)
+int my_sys_accept(int fd, struct sockaddr * uservaddr, int * addrlen)
 {
+	struct file *struct_file;
+    struct socket *socket;
+    struct sock *sk;
+    // int pflag;
+    int new_fd = 0;
+    // char* pname, *p;
+	char temp[128];
     if(net_monitoring)
     {
+    	printk(KERN_INFO "MY SYS ACCEPT STARTS\n");
     	get_time();
-		printk(KERN_INFO "HIJACKED: connect %04d.%02d.%02d %02d:%02d:%02d, \n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+	    // pflag = 0;
+
+	    new_fd = original_accept_call(fd, uservaddr, addrlen);
+	    struct_file = (current->files->fdt->fd[new_fd]);
+	    socket = (struct socket*) struct_file->private_data;
+	    sk = socket->sk;
+		printk(KERN_INFO "%04d.%02d.%02d %02d:%02d:%02d, accept %d %s %pI4 %d\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, current->pid, d_path(&(current->mm->exe_file->f_path), temp, 128), (&(sk->__sk_common.skc_addrpair)), (le16_to_cpu((sk->__sk_common.skc_portpair)>>16)));
     }
-    return original_connect_call(fd, uservaddr, addrlen);
+    printk(KERN_INFO "MY SYS ACCEPT ENDS\n");
+    return new_fd;
 }
 
 int my_sys_mount(char * dev_name, char * dir_name, char * type, unsigned long flags, void * data)
@@ -392,13 +416,13 @@ static int __init init_simpleproc (void)
     original_read_call = syscall_table[__NR_read];
     original_write_call = syscall_table[__NR_write];
     original_listen_call = syscall_table[__NR_listen];
-    original_connect_call = syscall_table[__NR_connect];	
+    original_accept_call = syscall_table[__NR_accept];	
     original_mount_call = syscall_table[__NR_mount];
     syscall_table[__NR_open] = my_sys_open;
     syscall_table[__NR_read] = my_sys_read;
     syscall_table[__NR_write] = my_sys_write;
     syscall_table[__NR_listen] = my_sys_listen;
-    syscall_table[__NR_connect] = my_sys_connect;
+    syscall_table[__NR_accept] = my_sys_accept;
     syscall_table[__NR_mount] = my_sys_mount;
 
     write_cr0(cr0);
@@ -416,7 +440,7 @@ static void __exit exit_simpleproc(void)
     syscall_table[__NR_read] = original_read_call;
     syscall_table[__NR_write] = original_write_call;
     syscall_table[__NR_listen] = original_listen_call;
-    syscall_table[__NR_connect] = original_connect_call;
+    syscall_table[__NR_accept] = original_accept_call;
     syscall_table[__NR_mount] = original_mount_call;
 
     printk(KERN_DEBUG "Everything is back to normal\n");
